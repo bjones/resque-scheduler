@@ -5,19 +5,37 @@ module Resque
     module Lock
       class Resilient < Base
         def acquire!
-          Resque.redis.evalsha(
-            acquire_sha,
-            :keys => [key],
-            :argv => [value]
-          ).to_i == 1
+          refresh = false
+          begin
+            Resque.redis.evalsha(
+              acquire_sha(refresh),
+              :keys => [key],
+              :argv => [value]
+            ).to_i == 1
+          rescue Exception => e
+            if e.message =~ /NOSCRIPT/
+              refresh = true
+              retry
+            end
+            raise
+          end
         end
 
         def locked?
-          Resque.redis.evalsha(
-            locked_sha,
-            :keys => [key],
-            :argv => [value]
-          ).to_i == 1
+          refresh = false
+          begin
+            Resque.redis.evalsha(
+              locked_sha(refresh),
+              :keys => [key],
+              :argv => [value]
+            ).to_i == 1
+          rescue Exception => e
+            if e.message =~ /NOSCRIPT/
+              refresh = true
+              retry
+            end
+            raise
+          end
         end
 
         private

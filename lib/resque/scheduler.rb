@@ -70,9 +70,9 @@ module Resque
               update_schedule if dynamic
             end
           rescue Exception => e
-            warn e.message
-            if e.message =~ /READONLY/ || 
-              e.message =~ /NOSCRIPT No matching script. Please use EVAL./
+            logger.warn e.message
+            role = Resque.redis.info['role'] rescue nil
+            if role != 'master'
               Resque.redis.client.reconnect
               retry
             end
@@ -96,7 +96,7 @@ module Resque
           trap('USR1') { print_schedule }
           trap('USR2') { reload_schedule! }
         rescue ArgumentError
-          warn "Signals QUIT and USR1 and USR2 not supported."
+          logger.warn "Signals QUIT and USR1 and USR2 not supported."
         end
       end
 
@@ -158,9 +158,19 @@ module Resque
             if !config[interval_type].nil? && config[interval_type].length > 0
               args = optionizate_interval_value(config[interval_type])
               @@scheduled_jobs[name] = rufus_scheduler.send(interval_type, *args) do
-                if is_master?
-                  log! "queueing #{config['class']} (#{name})"
-                  handle_errors { enqueue_from_config(config) }
+                begin 
+                  if is_master?
+                    log! "queueing #{config['class']} (#{name})"
+                    handle_errors { enqueue_from_config(config) }
+                  end
+                rescue Exception => e
+                  logger.warn e.message
+                  role = Resque.redis.info['role'] rescue nil
+                  if role != 'master'
+                    Resque.redis.client.reconnect
+                    retry
+                  end
+                  raise
                 end
               end
               interval_defined = true
@@ -170,13 +180,6 @@ module Resque
           unless interval_defined
             log! "no #{interval_types.join(' / ')} found for #{config['class']} (#{name}) - skipping"
           end
-        end
-      rescue Exception => e
-        warn e.message
-        if e.message =~ /READONLY/ || 
-          e.message =~ /NOSCRIPT No matching script. Please use EVAL./
-          Resque.redis.client.reconnect
-          retry
         end
       end
 
