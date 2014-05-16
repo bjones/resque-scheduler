@@ -64,12 +64,17 @@ module Resque
 
         # Now start the scheduling part of the loop.
         loop do
-          if is_master?
-            begin
+          begin
+            if is_master?
               handle_delayed_items
               update_schedule if dynamic
-            rescue Errno::EAGAIN, Errno::ECONNRESET => e
-              warn e.message
+            end
+          rescue Exception => e
+            warn e.message
+            if e.message =~ /READONLY/ || 
+              e.message =~ /NOSCRIPT No matching script. Please use EVAL./
+              Resque.redis.client.reconnect
+              retry
             end
           end
           poll_sleep
@@ -165,6 +170,13 @@ module Resque
           unless interval_defined
             log! "no #{interval_types.join(' / ')} found for #{config['class']} (#{name}) - skipping"
           end
+        end
+      rescue Exception => e
+        warn e.message
+        if e.message =~ /READONLY/ || 
+          e.message =~ /NOSCRIPT No matching script. Please use EVAL./
+          Resque.redis.client.reconnect
+          retry
         end
       end
 
