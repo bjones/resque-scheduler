@@ -70,11 +70,11 @@ module Resque
               update_schedule if dynamic
             end
           rescue Exception => e
-            warn e.message
-            if e.message =~ /READONLY/ || 
-              e.message =~ /NOSCRIPT No matching script. Please use EVAL./
-              Resque.redis.client.reconnect
-              retry
+            logger.warn e.message
+            role = Resque.redis.info['role'] rescue nil
+            if role != 'master'
+              reconnected = Resque.redis.client.reconnect rescue false
+              retry if reconnected
             end
           end
           poll_sleep
@@ -158,9 +158,19 @@ module Resque
             if !config[interval_type].nil? && config[interval_type].length > 0
               args = optionizate_interval_value(config[interval_type])
               @@scheduled_jobs[name] = rufus_scheduler.send(interval_type, *args) do
-                if is_master?
-                  log! "queueing #{config['class']} (#{name})"
-                  handle_errors { enqueue_from_config(config) }
+                begin
+                  if is_master?
+                    log! "queueing #{config['class']} (#{name})"
+                    handle_errors { enqueue_from_config(config) }
+                  end
+                rescue Exception => e
+                  logger.warn e.message
+                  role = Resque.redis.info['role'] rescue nil
+                  if role != 'master'
+                    reconnected = Resque.redis.client.reconnect rescue false
+                    retry if reconnected
+                  end
+                  raise
                 end
               end
               interval_defined = true
@@ -170,13 +180,6 @@ module Resque
           unless interval_defined
             log! "no #{interval_types.join(' / ')} found for #{config['class']} (#{name}) - skipping"
           end
-        end
-      rescue Exception => e
-        warn e.message
-        if e.message =~ /READONLY/ || 
-          e.message =~ /NOSCRIPT No matching script. Please use EVAL./
-          Resque.redis.client.reconnect
-          retry
         end
       end
 
