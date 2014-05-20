@@ -73,8 +73,8 @@ module Resque
             logger.warn e.message
             role = Resque.redis.info['role'] rescue nil
             if role != 'master'
-              Resque.redis.client.reconnect
-              retry
+              reconnected = Resque.redis.client.reconnect rescue false
+              retry if reconnected
             end
           end
           poll_sleep
@@ -158,7 +158,7 @@ module Resque
             if !config[interval_type].nil? && config[interval_type].length > 0
               args = optionizate_interval_value(config[interval_type])
               @@scheduled_jobs[name] = rufus_scheduler.send(interval_type, *args) do
-                begin 
+                begin
                   if is_master?
                     log! "queueing #{config['class']} (#{name})"
                     handle_errors { enqueue_from_config(config) }
@@ -167,8 +167,8 @@ module Resque
                   logger.warn e.message
                   role = Resque.redis.info['role'] rescue nil
                   if role != 'master'
-                    Resque.redis.client.reconnect
-                    retry
+                    reconnected = Resque.redis.client.reconnect rescue false
+                    retry if reconnected
                   end
                   raise
                 end
