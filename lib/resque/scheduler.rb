@@ -329,7 +329,7 @@ module Resque
 
         if @sleeping
           thread = Thread.new do
-            Resque.clean_schedules
+            Resque.clean_schedules unless dynamic
             release_master_lock!
           end
           thread.join
